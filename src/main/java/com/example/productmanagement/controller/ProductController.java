@@ -2,12 +2,19 @@ package com.example.productmanagement.controller;
 
 import com.example.productmanagement.entity.Product;
 import com.example.productmanagement.service.ProductService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,12 +35,63 @@ public class ProductController {
     
     // TODO: List all products - GET /products
     @GetMapping
-    public String listProducts(Model model) {
-        // 1. Get all products from service
-        // 2. Add to model
-        // 3. Return "product-list"
-        List<Product> products = productService.getAllProducts();
+    public String listProducts(
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            Model model) {
+        
+        List<Product> products;
+        
+        // Check if sorting is requested
+        if (sortBy != null && !sortBy.isEmpty()) {
+            Sort sort = sortDir.equals("asc") ? 
+                Sort.by(sortBy).ascending() : 
+                Sort.by(sortBy).descending();
+            
+            // Filter by category if provided
+            if (category != null && !category.isEmpty()) {
+                products = productService.getProductsByCategory(category);
+                // Apply sorting manually since findByCategory returns List
+                products = products.stream()
+                        .sorted((p1, p2) -> {
+                            int comparison = 0;
+                            switch (sortBy) {
+                                case "name":
+                                    comparison = p1.getName().compareTo(p2.getName());
+                                    break;
+                                case "price":
+                                    comparison = p1.getPrice().compareTo(p2.getPrice());
+                                    break;
+                                case "quantity":
+                                    comparison = Integer.compare(p1.getQuantity(), p2.getQuantity());
+                                    break;
+                                case "category":
+                                    comparison = p1.getCategory().compareTo(p2.getCategory());
+                                    break;
+                                default:
+                                    comparison = p1.getId().compareTo(p2.getId());
+                            }
+                            return sortDir.equalsIgnoreCase("desc") ? -comparison : comparison;
+                        })
+                        .toList();
+            } else {
+                products = productService.getAllProducts(sort);
+            }
+        } else {
+            // No sorting requested
+            if (category != null && !category.isEmpty()) {
+                products = productService.getProductsByCategory(category);
+            } else {
+                products = productService.getAllProducts();
+            }
+        }
+        
         model.addAttribute("products", products);
+        model.addAttribute("sortBy", sortBy);
+        model.addAttribute("sortDir", sortDir);
+        model.addAttribute("category", category);
+        
         return "product-list";
     }
     
@@ -68,14 +126,24 @@ public class ProductController {
     
     // Save product - POST /products/save
 @PostMapping("/save")
-public String saveProduct(@ModelAttribute("product") Product product, RedirectAttributes redirectAttributes) {
-    // 1. Save product using service
-    productService.saveProduct(product);
+public String saveProduct(
+    @Valid @ModelAttribute("product") Product product,
+    BindingResult result,
+    Model model,
+    RedirectAttributes redirectAttributes) {
     
-    // 2. Add success message
-    redirectAttributes.addFlashAttribute("success", "Product saved successfully!");
+    // Check for validation errors
+    if (result.hasErrors()) {
+        return "product-form";
+    }
     
-    // 3. Redirect to list
+    try {
+        productService.saveProduct(product);
+        redirectAttributes.addFlashAttribute("message", "Product saved successfully!");
+    } catch (Exception e) {
+        redirectAttributes.addFlashAttribute("error", "Error: " + e.getMessage());
+    }
+    
     return "redirect:/products";
 }
 
@@ -92,17 +160,53 @@ public String deleteProduct(@PathVariable Long id, RedirectAttributes redirectAt
     return "redirect:/products";
 }
 
-// Search products - GET /products/search
+// Search products - GET /products/search (with pagination)
 @GetMapping("/search")
-public String searchProducts(@RequestParam("keyword") String keyword, Model model) {
-    // 1. Search products from service
-    List<Product> products = productService.searchProducts(keyword);
+public String searchProducts(
+    @RequestParam("keyword") String keyword,
+    @RequestParam(defaultValue = "0") int page,
+    @RequestParam(defaultValue = "1") int size,
+    Model model) {
     
-    // 2. Add results and keyword to model
-    model.addAttribute("products", products);
+    // Create pageable object
+    Pageable pageable = PageRequest.of(page, size);
+    
+    // Search products with pagination
+    Page<Product> productPage = productService.searchProducts(keyword, pageable);
+    
+    // Add results and pagination info to model
+    model.addAttribute("products", productPage.getContent());
     model.addAttribute("keyword", keyword);
+    model.addAttribute("currentPage", page);
+    model.addAttribute("totalPages", productPage.getTotalPages());
+    model.addAttribute("totalItems", productPage.getTotalElements());
     
-    // 3. Return "product-list"
+    return "product-list";
+}
+
+// Advanced search - GET /products/advanced-search
+@GetMapping("/advanced-search")
+public String advancedSearch(
+    @RequestParam(required = false) String name,
+    @RequestParam(required = false) String category,
+    @RequestParam(required = false) BigDecimal minPrice,
+    @RequestParam(required = false) BigDecimal maxPrice,
+    Model model) {
+    
+    // Convert empty strings to null for proper query handling
+    String searchName = (name != null && !name.trim().isEmpty()) ? name.trim() : null;
+    String searchCategory = (category != null && !category.trim().isEmpty()) ? category.trim() : null;
+    
+    // Search products with multiple criteria
+    List<Product> products = productService.advancedSearch(searchName, searchCategory, minPrice, maxPrice);
+    
+    // Add results and search parameters to model
+    model.addAttribute("products", products);
+    model.addAttribute("searchName", searchName);
+    model.addAttribute("searchCategory", searchCategory);
+    model.addAttribute("searchMinPrice", minPrice);
+    model.addAttribute("searchMaxPrice", maxPrice);
+    
     return "product-list";
 }
 }

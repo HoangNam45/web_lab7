@@ -166,3 +166,183 @@ Browser → ProductController.deleteProduct(id)
 
 ---
 
+## 9. Sorting Products
+**URL:** http://localhost:8081/products?sortBy=name&sortDir=asc
+
+**Flow:**
+1. User clicks on a column header (e.g., Name, Price, Quantity) in the product table
+2. Browser sends GET request with sortBy and sortDir parameters
+   - Example: `/products?sortBy=name&sortDir=asc`
+3. Controller receives sortBy (column name) and sortDir (asc/desc) parameters
+4. Controller creates Sort object: `Sort.by(sortBy).ascending()` or `Sort.by(sortBy).descending()`
+5. Controller calls `productService.getAllProducts(sort)`
+6. Service calls `productRepository.findAll(sort)`
+7. Repository queries database with ORDER BY clause
+8. Returns sorted List<Product>
+9. Controller adds products, sortBy, sortDir, and reverseSortDir to Model
+10. Returns "product-list" view
+11. Thymeleaf renders table with sort indicators (↑/↓ arrows)
+12. User sees products sorted by selected column
+
+**Features:**
+- Click column header to sort by that column
+- Click again to reverse sort direction (asc ↔ desc)
+- Visual indicators (↑ for ascending, ↓ for descending)
+- Default sort: by ID ascending
+
+**Sortable Columns:**
+- ID
+- Name
+- Price
+- Quantity
+- Category
+
+**Code Path:**
+```
+Browser → ProductController.listProducts(sortBy, sortDir)
+       → Create Sort object
+       → ProductService.getAllProducts(sort)
+       → ProductRepository.findAll(sort)
+       → Database (SELECT with ORDER BY)
+       → product-list.html (with sort indicators)
+```
+
+---
+
+## 10. Filter Products by Category
+**URL:** http://localhost:8081/products?category=Electronics
+
+**Flow:**
+1. User clicks a category button (e.g., Electronics, Clothing, Books)
+2. Browser sends GET request with category parameter
+   - Example: `/products?category=Electronics`
+3. Controller receives category parameter
+4. Controller calls `productService.getProductsByCategory(category)`
+5. Service calls `productRepository.findByCategory(category)`
+6. Repository queries database: `SELECT * FROM product WHERE category = ?`
+7. Returns filtered List<Product>
+8. Controller adds filtered products and currentCategory to Model
+9. Returns "product-list" view
+10. Thymeleaf highlights active category button
+11. User sees only products from selected category
+
+**Features:**
+- Category buttons: All Categories, Electronics, Clothing, Books, Furniture, Food, Sports
+- Active category button highlighted in blue
+- "All Categories" button shows all products
+- Category filter persists when sorting
+
+**Code Path:**
+```
+Browser → ProductController.listProducts(category)
+       → ProductService.getProductsByCategory(category)
+       → ProductRepository.findByCategory(category)
+       → Database (SELECT with WHERE)
+       → product-list.html (with category highlight)
+```
+
+---
+
+## 11. Combined Sorting and Filtering
+**URL:** http://localhost:8081/products?category=Electronics&sortBy=price&sortDir=desc
+
+**Flow:**
+1. User selects a category filter (e.g., Electronics)
+2. User clicks a column header to sort (e.g., Price descending)
+3. Browser sends GET request with both category and sort parameters
+   - Example: `/products?category=Electronics&sortBy=price&sortDir=desc`
+4. Controller receives category, sortBy, and sortDir parameters
+5. Controller calls `productService.getProductsByCategory(category)`
+6. Service returns filtered List<Product> by category
+7. Controller applies manual sorting using Java Stream API:
+   - Compares products based on sortBy field (name, price, quantity, category)
+   - Applies sortDir (ascending or descending)
+8. Controller adds sorted and filtered products to Model
+9. Returns "product-list" view
+10. User sees products filtered by category AND sorted by selected column
+
+**Features:**
+- Category buttons preserve current sort order
+- Sort links preserve current category filter
+- Visual indicators show both active category and sort direction
+- Can sort any column while filtering by category
+
+**Example Scenarios:**
+- Show all Electronics sorted by price (low to high)
+- Show all Books sorted by name (A-Z)
+- Show all Clothing sorted by quantity (high to low)
+
+**Code Path:**
+```
+Browser → ProductController.listProducts(category, sortBy, sortDir)
+       → ProductService.getProductsByCategory(category)
+       → ProductRepository.findByCategory(category)
+       → Database (SELECT with WHERE)
+       → Manual sorting in Controller using Stream API
+       → product-list.html (with category + sort indicators)
+```
+
+**Technical Details:**
+- Sorting is applied manually using Java Comparator when filtering by category
+- Repository method findByCategory() returns List (not pageable)
+- Switch statement handles different sortBy fields (name, price, quantity, category, id)
+- Comparator direction reversed for descending order
+
+---
+
+## 12. Statistics Dashboard
+**URL:** http://localhost:8081/dashboard
+
+**Flow:**
+1. User clicks "Dashboard" button from product list page
+2. Browser sends GET request to `/dashboard`
+3. Controller calls multiple service methods to gather statistics:
+   - `getTotalProductCount()` - Total number of products
+   - `countByCategory(category)` - Count products per category
+   - `calculateTotalValue()` - Sum of (price × quantity) for all products
+   - `calculateAveragePrice()` - Average price across all products
+   - `getLowStockProducts(10)` - Products with quantity < 10
+   - `getRecentProducts()` - Last 5 products added
+4. Service calls corresponding repository methods with @Query annotations
+5. Controller adds all statistics to Model
+6. Returns "dashboard" view
+7. Thymeleaf renders dashboard with statistics cards and tables
+8. User sees comprehensive overview of inventory status
+
+**Features:**
+- **Statistics Cards**: Display key metrics (total products, total value, average price, low stock count)
+- **Products by Category**: Visual breakdown showing product count per category
+- **Low Stock Alerts**: Table of products with quantity < 10 (highlighted in red)
+- **Recent Products**: Table showing last 5 products added with timestamps
+
+**Repository Queries:**
+- `@Query("SELECT COUNT(p) FROM Product p WHERE p.category = :category")` - Count by category
+- `@Query("SELECT SUM(p.price * p.quantity) FROM Product p")` - Total inventory value
+- `@Query("SELECT AVG(p.price) FROM Product p")` - Average product price
+- `@Query("SELECT p FROM Product p WHERE p.quantity < :threshold")` - Low stock products
+- `findTop5ByOrderByCreatedAtDesc()` - Recent products using Spring Data JPA naming convention
+
+**Code Path:**
+```
+Browser → DashboardController.showDashboard()
+       → Multiple ProductService method calls:
+         - getTotalProductCount() → ProductRepository.count()
+         - countByCategory() → ProductRepository.countByCategory(@Query)
+         - calculateTotalValue() → ProductRepository.calculateTotalValue(@Query)
+         - calculateAveragePrice() → ProductRepository.calculateAveragePrice(@Query)
+         - getLowStockProducts(10) → ProductRepository.findLowStockProducts(@Query)
+         - getRecentProducts() → ProductRepository.findTop5ByOrderByCreatedAtDesc()
+       → Database (SELECT with aggregations)
+       → dashboard.html (with statistics visualization)
+```
+
+**Technical Details:**
+- Uses JPQL @Query annotations for custom aggregation queries (COUNT, SUM, AVG)
+- Null-safe handling: returns BigDecimal.ZERO if no products exist
+- Category statistics dynamically generated for predefined categories
+- Low stock threshold configurable (currently 10 items)
+- Recent products sorted by createdAt timestamp in descending order
+- Dashboard accessible from main product list via green "Dashboard" button
+
+---
+
